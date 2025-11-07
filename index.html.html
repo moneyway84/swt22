@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>입지 강의 카톡 챗봇 · MVP</title>
+  <style>
+    :root{
+      --bg:#f5f7fb;          /* 앱 배경 */
+      --header:#2b2d42;      /* 헤더 텍스트 */
+      --accent:#4f46e5;      /* 버튼/하이라이트 */
+      --me:#daf0ff;          /* 내 말풍선 배경 */
+      --bot:#ffffff;         /* 봇 말풍선 배경 */
+      --border:#e5e7eb;      /* 경계선 */
+      --muted:#6b7280;       /* 보조 텍스트 */
+    }
+    html,body{height:100%;}
+    body{
+      margin:0; background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Pretendard,Apple SD Gothic Neo,Malgun Gothic,Helvetica,Arial,sans-serif; color:#111827;
+      display:flex; justify-content:center; align-items:stretch;
+    }
+    /* 앱 프레임 (모바일 우선, 데스크탑도 중앙 정렬) */
+    .app{ width:100%; max-width:720px; height:100dvh; display:flex; flex-direction:column; box-shadow:0 8px 32px rgba(0,0,0,.06); background:#eef1f7; }
+
+    /* 헤더 */
+    .header{ position:sticky; top:0; z-index:10; background:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--border); }
+    .avatar{ width:36px; height:36px; border-radius:999px; background:linear-gradient(135deg,#60a5fa,#34d399); display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; }
+    .title{ font-weight:700; color:var(--header); }
+    .subtitle{ font-size:12px; color:var(--muted); display:flex; align-items:center; gap:6px; }
+    .dot{ width:8px; height:8px; border-radius:999px; background:#22c55e; display:inline-block; }
+
+    /* 채팅 영역 */
+    .chat{ flex:1; overflow:auto; padding:14px 12px 90px; background:linear-gradient(180deg,#f6f8fc 0%, #eef1f7 100%); }
+    .row{ display:flex; margin:10px 0; gap:8px; }
+    .row.bot{ justify-content:flex-start; }
+    .row.user{ justify-content:flex-end; }
+    .bubble{ max-width:78%; padding:10px 12px; border-radius:16px; line-height:1.45; box-shadow:0 2px 8px rgba(0,0,0,.06); border:1px solid var(--border); word-break:keep-all; }
+    .bot .bubble{ background:var(--bot); border-top-left-radius:6px; }
+    .user .bubble{ background:var(--me); border-top-right-radius:6px; }
+    .meta{ font-size:11px; color:var(--muted); margin-top:6px; }
+
+    /* 입력 바 */
+    .composer{ position:fixed; left:50%; transform:translateX(-50%); bottom:12px; width:clamp(280px, 100%, 720px); padding:8px 10px; }
+    .composer-inner{ background:#fff; border:1px solid var(--border); border-radius:999px; display:flex; align-items:center; gap:8px; padding:8px; box-shadow:0 6px 14px rgba(0,0,0,.06); }
+    input[type="text"]{ border:none; outline:none; flex:1; font-size:16px; background:transparent; padding:8px; }
+    button.send{ background:var(--accent); color:#fff; border:none; border-radius:999px; padding:10px 14px; font-weight:700; display:flex; align-items:center; gap:6px; }
+    button.send:disabled{ opacity:.5; }
+
+    /* 타이핑 애니 */
+    .typing{ display:inline-flex; gap:4px; align-items:center; }
+    .typing span{ width:6px; height:6px; background:#9ca3af; border-radius:999px; display:inline-block; animation:blink 1.2s infinite; }
+    .typing span:nth-child(2){ animation-delay:.2s; }
+    .typing span:nth-child(3){ animation-delay:.4s; }
+    @keyframes blink{ 0%,80%,100%{ opacity:.2 } 40%{ opacity:1 } }
+
+    /* 유틸 버튼 바(선택) */
+    .quick{ display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 0 44px; }
+    .chip{ font-size:13px; padding:8px 10px; background:#fff; border:1px solid var(--border); border-radius:999px; color:#374151; }
+
+    /* 스크롤 바 얇게 */
+    .chat::-webkit-scrollbar{ width:6px; }
+    .chat::-webkit-scrollbar-thumb{ background:#c7d2fe; border-radius:999px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="header">
+      <div class="avatar">LH</div>
+      <div>
+        <div class="title">입지 강사봇</div>
+        <div class="subtitle"><i class="dot"></i> 온라인 · 모바일 최적화</div>
+      </div>
+    </div>
+
+    <div id="chat" class="chat" aria-live="polite"></div>
+
+    <div class="composer">
+      <div class="composer-inner">
+        <input id="prompt" type="text" placeholder="질문을 입력하세요 (예: 6억 언더 신정 vs 철산)" autocomplete="off" />
+        <button id="send" class="send" aria-label="전송">보내기 ➤</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // -----------------------------
+    // 1) 테스트용 지식 카드 (와이프님 말투)
+    // -----------------------------
+    const KNOWLEDGE = [
+      {
+        topic: "신정푸른마을 vs 도덕파크타운",
+        user_question_examples: [
+          "6억 언더로 신정푸른마을이랑 도덕파크타운 중 어디가 나을까요?",
+          "신정푸른마을이랑 도덕파크타운 비교 좀 해주세요",
+          "철산 도덕파크타운이랑 양천 신정푸른마을 중 추천은요?",
+          "6억 언더 신정 vs 철산"
+        ],
+        assistant_answer:
+          "6억 언더 예산이라면 현실적으로 신정푸른마을 2단지가 조금 더 접근성이 좋아요 😊 도덕파크타운은 역세권 대단지 장점이 있지만, 시세가 6억 후반~7억이라 예산 초과 위험이 있어요. 신정푸른마을은 버스 노선이 다양하고 초품아 단지로 실거주 만족도가 높아요. 서부트럭터미널 개발도 장기적 호재로 기대돼요 💡"
+      },
+      {
+        topic: "도덕파크타운 장단점",
+        user_question_examples: [
+          "도덕파크타운 입지 괜찮나요?",
+          "철산 도덕파크타운 장점이 뭐예요?",
+          "광명 도덕파크타운 교통 어떤가요?"
+        ],
+        assistant_answer:
+          "도덕파크타운은 광명 철산동 핵심 입지로 7호선 철산역 도보권이에요 🚉 대단지라 주거 안정감 있고 상권·학교가 도보권이라 생활 편의성도 높아요. 다만 언덕 동선과 일부동 지하주차장 연결이 제한적인 점은 유의해야 해요."
+      },
+      {
+        topic: "신정푸른마을 장단점",
+        user_question_examples: [
+          "신정푸른마을2단지 살기 어떤가요?",
+          "양천 신정푸른마을 교통 불편하지 않나요?",
+          "푸른마을2단지 입지 평가해주세요"
+        ],
+        assistant_answer:
+          "푸른마을2단지는 양천구 신정동 외곽에 위치하지만, 버스 접근성이 좋고 초품아 단지라 학군 만족도가 높아요 📚 주변에 양천중앙도서관이 있고 목동 학원가도 자전거 거리예요. 다만 지하철 역세권은 아니고 세대수도 작지만, 조용한 환경과 서부트럭터미널 개발 호재로 장기 가치가 기대돼요."
+      }
+    ];
+
+    // -----------------------------
+    // 2) 간단 검색 로직 (MVP)
+    //    - 질문과 가장 유사한 카드 선택
+    //    - 예시 문장 유사도 + 토큰 겹침 점수
+    // -----------------------------
+    function normalize(text){
+      return (text||"")
+        .toLowerCase()
+        .replace(/[\n\r]/g," ")
+        .replace(/[^0-9a-z가-힣\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function tokenSet(str){
+      return new Set(normalize(str).split(" ").filter(Boolean));
+    }
+
+    function jaccard(a,b){
+      const A = tokenSet(a), B = tokenSet(b);
+      const inter = new Set([...A].filter(x=>B.has(x))).size;
+      const union = new Set([...A, ...B]).size || 1;
+      return inter/union;
+    }
+
+    function bestCard(query){
+      let best = {score:0, card:null};
+      for(const card of KNOWLEDGE){
+        let score = 0;
+        // 1) 토픽명 유사도
+        score += jaccard(query, card.topic) * 0.4;
+        // 2) 예시문장 중 최댓값
+        let exBest = 0;
+        for(const ex of card.user_question_examples){
+          exBest = Math.max(exBest, jaccard(query, ex));
+        }
+        score += exBest * 0.6;
+        if(score > best.score){ best = {score, card}; }
+      }
+      return best;
+    }
+
+    // -----------------------------
+    // 3) UI 유틸
+    // -----------------------------
+    const chatEl = document.getElementById('chat');
+    const promptEl = document.getElementById('prompt');
+    const sendEl = document.getElementById('send');
+
+    function scrollToBottom(){ chatEl.scrollTop = chatEl.scrollHeight; }
+
+    function bubble(role, html){
+      const row = document.createElement('div');
+      row.className = `row ${role}`;
+      row.innerHTML = `
+        ${role==='bot'?'<div class="avatar" style="width:28px;height:28px;font-size:12px;">LH</div>':''}
+        <div class="bubble">${html}</div>
+      `;
+      chatEl.appendChild(row);
+      scrollToBottom();
+    }
+
+    function typingStart(){
+      const row = document.createElement('div');
+      row.className = 'row bot';
+      row.id = 'typing-row';
+      row.innerHTML = `
+        <div class="avatar" style="width:28px;height:28px;font-size:12px;">LH</div>
+        <div class="bubble"><span class="typing"><span></span><span></span><span></span></span></div>
+      `;
+      chatEl.appendChild(row);
+      scrollToBottom();
+    }
+
+    function typingStop(){
+      const t = document.getElementById('typing-row');
+      if(t) t.remove();
+    }
+
+    function disableComposer(disabled){
+      promptEl.disabled = disabled; sendEl.disabled = disabled;
+    }
+
+    // -----------------------------
+    // 4) 응답 생성 (로컬 RAG → 추후 OpenAI 연결 지점)
+    // -----------------------------
+    async function answer(query){
+      const {score, card} = bestCard(query);
+      // 간단 임계치 (0.18 미만이면 모르는 걸로 처리)
+      if(!card || score < 0.18){
+        return (
+          "질문 감사합니다. 핵심 키워드를 조금만 더 알려주실 수 있을까요? \n\n"+
+          "예) ‘예산 6억 언더 / 신정푸른마을 vs 도덕파크타운 / 실거주 vs 투자’처럼요."
+        );
+      }
+      return card.assistant_answer;
+    }
+
+    // ▼▼▼ OpenAI 연결(선택): 나중에 이 부분을 활성화하세요 ▼▼▼
+    /*
+    async function answerWithOpenAI(query){
+      const context = KNOWLEDGE.map(k=>`[${k.topic}] ${k.assistant_answer}`).join('\n');
+      const sys = `당신은 부동산 입지 강의 보조 강사입니다. 반드시 제공된 컨텍스트만 근거로 답하고, 모르면 추가 정보를 요청하세요. 말투는 친절한 해요체.`;
+
+      const r = await fetch('https://api.openai.com/v1/chat/completions',{
+        method:'POST',
+        headers:{
+          'Content-Type':'application/json',
+          'Authorization':'Bearer YOUR_OPENAI_API_KEY'
+        },
+        body: JSON.stringify({
+          model: 'gpt-5',
+          messages:[
+            {role:'system', content: sys},
+            {role:'user', content: `컨텍스트:\n${context}\n\n사용자 질문:${query}`}
+          ],
+          temperature:0.3
+        })
+      });
+      const data = await r.json();
+      return data.choices?.[0]?.message?.content?.trim() || '지금은 응답이 어려워요. 잠시 후 다시 시도해주세요.';
+    }
+    */
+
+    // -----------------------------
+    // 5) 초기 환영 메시지 & 퀵칩
+    // -----------------------------
+    function welcome(){
+      bubble('bot',
+        "안녕하세요, <b>입지 강사봇</b>이에요 😊<br/>"+
+        "수강생 질문을 와이프님의 강의 자료를 바탕으로 빠르게 정리해 드릴게요.<br/>"+
+        "예: <i>6억 언더 신정푸른마을 vs 도덕파크타운</i>"
+      );
+      const q = document.createElement('div');
+      q.className = 'quick';
+      q.innerHTML = [
+        '6억 언더 신정 vs 철산',
+        '도덕파크타운 장단점',
+        '신정푸른마을 장단점'
+      ].map(t=>`<button class=\"chip\" data-q=\"${t}\">${t}</button>`).join('');
+      chatEl.appendChild(q);
+    }
+
+    chatEl.addEventListener('click', (e)=>{
+      const btn = e.target.closest('.chip');
+      if(!btn) return;
+      promptEl.value = btn.dataset.q;
+      sendEl.click();
+    });
+
+    // -----------------------------
+    // 6) 전송 핸들러
+    // -----------------------------
+    async function onSend(){
+      const q = promptEl.value.trim();
+      if(!q) return;
+      bubble('user', escapeHtml(q));
+      promptEl.value = '';
+      disableComposer(true);
+      typingStart();
+      try{
+        // 기본: 로컬 RAG
+        const a = await new Promise(res=> setTimeout(async()=> res(await answer(q)), 450));
+        // OpenAI 사용 시 아래로 교체
+        // const a = await answerWithOpenAI(q);
+        typingStop();
+        bubble('bot', linkify(escapeHtml(a)).replace(/\n/g,'<br/>'));
+      }catch(err){
+        typingStop();
+        bubble('bot', '죄송해요. 잠시 오류가 발생했어요. 다시 시도해 주세요.');
+        console.error(err);
+      }finally{
+        disableComposer(false);
+        promptEl.focus();
+      }
+    }
+
+    // -----------------------------
+    // 7) 헬퍼: XSS 방지 & 링크 자동화 (+ 테스트)
+    // -----------------------------
+    function escapeHtml(str){
+      return String(str).replace(/[&<>"]/g, c=>({
+        '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;'
+      })[c]);
+    }
+    function linkify(text){
+      const urlRe = /(https?:\/\/[^\s]+)/g;
+      return String(text).replace(urlRe, url=>`<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
+    }
+
+    // -----------------------------
+    // 8) 바인딩
+    // -----------------------------
+    sendEl.addEventListener('click', onSend);
+    promptEl.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter') onSend();
+    });
+
+    // -----------------------------
+    // 9) 간단 테스트 (추가)
+    // -----------------------------
+    function runTests(){
+      const fails = [];
+      const eq = (name, a, b)=>{ if(a!==b){ fails.push(`${name}: expected ${b} but got ${a}`); } };
+
+      // escapeHtml 테스트
+      eq('escapeHtml basic', escapeHtml('<a&"b>'), '&lt;a&amp;&quot;b&gt;');
+      eq('escapeHtml noop', escapeHtml('abc'), 'abc');
+
+      // linkify 테스트
+      eq('linkify http', linkify('go http://example.com now'), 'go <a href="http://example.com" target="_blank" rel="noopener">http://example.com</a> now');
+
+      // 검색 로직 스모크
+      const r = bestCard('6억 언더 신정 vs 철산');
+      if(!r.card){ fails.push('bestCard returned null'); }
+
+      return fails;
+    }
+
+    // 시작
+    welcome();
+    scrollToBottom();
+
+    // 테스트 실행 및 결과 표시(실패 시만 화면에 표시)
+    const testFails = runTests();
+    if(testFails.length){
+      console.error('[MVP TEST] failures:', testFails);
+      bubble('bot', '⚠️ 내부 테스트 실패: <br>'+ testFails.map(t=>`• ${escapeHtml(t)}`).join('<br>'));
+    } else {
+      console.log('[MVP TEST] all passed');
+    }
+  </script>
+</body>
+</html>
